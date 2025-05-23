@@ -1,0 +1,64 @@
+name: Obfuscate Worker Code
+
+on:
+  workflow_dispatch: # 允许手动触发
+
+jobs:
+  obfuscate:
+    runs-on: macos-latest # 使用最新macOS运行环境
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        persist-credentials: true # 保留推送权限
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    - name: Download worker.zip
+      run: |
+        gh release download -R https://github.com/bia-pain-bache/BPB-Worker-Panel.git --pattern 'worker.zip'
+
+    - name: Unzip files
+      run: |
+        unzip worker.zip -d worker_files
+        rm worker.zip
+
+    - name: Install obfuscator
+      run: npm install -g javascript-obfuscator
+
+    - name: Obfuscate code (low level)
+      run: |
+        find worker_files -type f -name "*.js" -exec sh -c '
+          for file; do
+            javascript-obfuscator "$file" \
+              --output "$file" \
+              --compact true \
+              --control-flow-flattening false \
+              --dead-code-injection false \
+              --debug-protection false \
+              --disable-console-output false \
+              --identifier-names-generator mangled \
+              --rename-globals true \
+              --rotate-string-array true \
+              --self-defending false \
+              --string-array true \
+              --string-array-threshold 0.75
+          done
+        ' sh {} +
+
+    - name: Move to repository root
+      run: |
+        mv worker_files/* .
+        rm -rf worker_files
+
+    - name: Commit changes
+      run: |
+        git config --global user.email "actions@github.com"
+        git config --global user.name "GitHub Actions"
+        git add .
+        git commit -m "Add obfuscated files" || echo "No changes to commit"
+        git push
