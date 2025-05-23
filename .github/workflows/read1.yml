@@ -6,7 +6,7 @@ on:
         description: "混淆阶段（base/medium/high）"
         required: true
         default: "base"
-        options: ["base", "medium", "high"]  # 基础→中等→高强度
+        options: ["base", "medium", "high"]
       comment:
         description: "调试备注"
         required: false
@@ -33,20 +33,16 @@ jobs:
 
       - name: 动态生成混淆参数
         run: |
-          # 定义各阶段参数（按强度递增）
           case "${{ github.event.inputs.run-type }}" in
             "base")
-              # 基础阶段：仅压缩+变量名混淆
               PARAMS="--compact true --identifier-names-generator hexadecimal"
               ;;
             "medium")
-              # 中等阶段：增加字符串数组加密+死代码注入
               PARAMS="--compact true --identifier-names-generator hexadecimal \
                       --string-array true --string-array-encoding 'rc4' \
                       --dead-code-injection true --dead-code-injection-threshold 0.3"
               ;;
             "high")
-              # 高强度阶段：开启控制流平坦化+调试保护
               PARAMS="--compact true --identifier-names-generator hexadecimal \
                       --string-array true --string-array-encoding 'rc4' \
                       --dead-code-injection true --dead-code-injection-threshold 0.5 \
@@ -58,19 +54,32 @@ jobs:
               exit 1
               ;;
           esac
-          echo "PARAMS=$PARAMS" >> "$GITHUB_ENV"  # 写入环境变量供后续步骤使用
+          echo "PARAMS=$PARAMS" >> "$GITHUB_ENV"
 
-      - name: 下载并处理资产（示例，可替换为你的文件路径逻辑）
+      - name: 下载资产并在服务器临时目录处理
         run: |
-          # 假设待混淆文件为仓库内的 src/worker.js
-          SOURCE_FILE="./src/worker.js"
-          if [[ ! -f "$SOURCE_FILE" ]]; then
-            echo "❌ 未找到源文件: $SOURCE_FILE"
+          REPO_OWNER="bia-pain-bache"
+          REPO_NAME="BPB-Worker-Panel"
+          TMP_DIR=$(mktemp -d)
+          cd "$TMP_DIR"
+
+          response=$(curl -s https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest)
+          DOWNLOAD_URL=$(echo "$response" | jq -r '.assets[] | select(.name == "worker.zip") | .browser_download_url')
+          curl -sL "$DOWNLOAD_URL" -o worker.zip
+          unzip -q worker.zip
+
+          SOURCE_FILE=$(find . -type f -name "*.js" | grep -v "_obfuscated.js" | head -n 1)
+          if [[ -z "$SOURCE_FILE" ]]; then
+            echo "❌ 未找到未混淆的JS文件"
             exit 1
           fi
+
           mkdir -p obfuscated
           javascript-obfuscator "$SOURCE_FILE" --output "obfuscated/worker.js" $PARAMS
           echo "✅ 混淆完成（阶段: ${{ github.event.inputs.run-type }}）"
+
+          cp -r "obfuscated" "$GITHUB_WORKSPACE/"
+          echo "✅ 混淆结果已从服务器临时目录同步到仓库目录"
 
       - name: 提交结果
         uses: stefanzweifel/git-auto-commit-action@v5
