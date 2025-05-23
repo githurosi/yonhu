@@ -1,6 +1,5 @@
 name: BPB Panel 资产混淆与重命名
 on:
-  # 手动触发（带参数）
   workflow_dispatch:
     inputs:
       run-type:
@@ -8,98 +7,70 @@ on:
         required: true
         default: "normal"
         options: ["normal", "debug"]
-      comment:
-        description: "手动运行备注（可选）"
-        required: false
-        default: ""
-  # 自动触发（代码推送/定时任务）
   push:
     branches:
       - main
   schedule:
-    - cron: "0 1 * * *"  # 每天凌晨1点自动运行
+    - cron: "0 1 * * *"
 
 permissions:
   contents: write
 
 jobs:
   build-obfuscate:
-    runs-on: macos-latest  # 指定 macOS 系统
+    runs-on: macos-latest
     steps:
-      - name: 检出仓库
+      - name: 检出仓库（仅用于提交结果，不依赖本地代码）
         uses: actions/checkout@v4
         with:
-          fetch-depth: 1  # 拉取最新代码，减少冗余数据
-
-      - name: 打印触发类型和 Runner 规格
-        run: |
-          # 打印触发方式
-          echo "===== 触发信息 ====="
-          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
-            echo "手动触发 | 模式: ${{ github.event.inputs.run-type }}"
-            echo "备注: ${{ github.event.inputs.comment }}"
-          else
-            echo "自动触发 | 事件: $GITHUB_EVENT_NAME"
-          fi
-          # 打印 Runner 规格（CPU/内存）
-          echo "\n===== macOS Runner 规格 ====="
-          sysctl -n machdep.cpu.brand_string  # CPU 型号
-          sysctl -n hw.logicalcpu              # 逻辑核心数
-          sysctl -n hw.memsize | awk '{printf "内存: %.2f GB\n", $1/1024/1024/1024}'  # 转换为 GB
-          echo "=========================="
+          fetch-depth: 1
 
       - name: 安装混淆工具
-        run: npm install -g javascript-obfuscator  # 安装 javascript-obfuscator
+        run: npm install -g javascript-obfuscator
 
-      - name: 下载并解压资产
+      - name: 下载资产并在服务器临时目录处理
         run: |
           REPO_OWNER="bia-pain-bache"
           REPO_NAME="BPB-Worker-Panel"
-          rm -rf unobfuscated/*  # 清空旧文件
-          # 获取最新版本资产链接
+          TMP_DIR=$(mktemp -d)  # 创建服务器临时目录（自动清理）
+          cd "$TMP_DIR"          # 进入临时目录操作
+
+          # 下载并解压资产（所有操作在服务器临时空间完成）
           response=$(curl -s https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest)
           DOWNLOAD_URL=$(echo "$response" | jq -r '.assets[] | select(.name == "worker.zip") | .browser_download_url')
-          if [[ -z "$DOWNLOAD_URL" ]]; then
-            echo "❌ 未找到 worker.zip"
-            exit 1
-          fi
-          mkdir -p unobfuscated  # 创建解压目录
-          curl -sL "$DOWNLOAD_URL" -o unobfuscated/worker.zip  # 下载文件
-          unzip -q unobfuscated/worker.zip -d unobfuscated/  # 静默解压
-          echo "✅ 资产解压完成"
+          curl -sL "$DOWNLOAD_URL" -o worker.zip
+          unzip -q worker.zip
 
-      - name: 混淆并重命名文件
-        run: |
-          mkdir -p 混淆  # 创建混淆结果目录
-          # 定位未混淆的 JS 文件（排除已混淆的文件）
-          SOURCE_FILE=$(find unobfuscated -type f -name "*.js" | grep -v "_obfuscated.js" | head -n 1)
+          # 定位未混淆文件
+          SOURCE_FILE=$(find . -type f -name "*.js" | grep -v "_obfuscated.js" | head -n 1)
           if [[ -z "$SOURCE_FILE" ]]; then
-            echo "❌ 未找到未混淆的 JS 文件"
+            echo "❌ 未找到未混淆的JS文件"
             exit 1
           fi
-          OUTPUT_NAME="worker.js"  # 目标文件名
-          # 根据运行模式调整混淆参数（调试模式降低强度）
+
+          # 执行混淆
+          mkdir -p obfuscated
+          OUTPUT_NAME="worker.js"
           if [[ "${{ github.event.inputs.run-type }}" == "debug" ]]; then
             DEBUG_PARAM="--dead-code-injection-threshold 0.2 --control-flow-flattening false"
-            echo "🚧 调试模式：已降低混淆强度"
           else
             DEBUG_PARAM=""
           fi
-          # 执行混淆命令
-          javascript-obfuscator "$SOURCE_FILE" --output "混淆/$OUTPUT_NAME" \
+          javascript-obfuscator "$SOURCE_FILE" --output "obfuscated/$OUTPUT_NAME" \
             --compact true \
             --dead-code-injection true \
             --identifier-names-generator hexadecimal \
             --string-array true \
             --string-array-encoding 'rc4' \
-            $DEBUG_PARAM  # 动态注入参数
-          echo "✅ 混淆完成并保存为：混淆/$OUTPUT_NAME"
+            $DEBUG_PARAM
 
-      - name: 提交结果到仓库
+          # 将混淆结果复制到仓库目录（GITHUB_WORKSPACE）
+          cp -r "$TMP_DIR/obfuscated" "$GITHUB_WORKSPACE/"
+          echo "✅ 混淆结果已从服务器临时目录同步到仓库目录"
+
+      - name: 提交混淆结果到仓库
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "🔄 混淆代码 | 触发方式: ${{ github.event_name }}"
+          commit_message: "🔄 服务器端混淆完成 | 模式: ${{ github.event.inputs.run-type }}"
           files: |
-            混淆/worker.js
-            unobfuscated/
-          commit_options: "--no-verify"  # 跳过 Git 钩子验证（可选）
+            obfuscated/worker.js
