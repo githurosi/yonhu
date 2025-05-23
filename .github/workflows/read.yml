@@ -4,7 +4,7 @@ on:
     branches:
       - main
   schedule:
-    - cron: "0 1 * * *" # 每天凌晨1点运行
+    - cron: "0 1 * * *" 
 
 permissions:
   contents: write
@@ -16,7 +16,7 @@ jobs:
       - name: 检出仓库
         uses: actions/checkout@v4
         with:
-          fetch-depth: 1 # 仅拉取最新提交，加快速度
+          fetch-depth: 1
 
       - name: 安装混淆工具
         run: |
@@ -26,46 +26,50 @@ jobs:
         run: |
           REPO_OWNER="bia-pain-bache"
           REPO_NAME="BPB-Worker-Panel"
-          rm -rf unobfuscated/* # 清空旧文件
-          # 获取最新Release信息
+          rm -rf unobfuscated/*
           response=$(curl -s https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest)
-          # 提取worker.zip下载地址
           DOWNLOAD_URL=$(echo "$response" | jq -r '.assets[] | select(.name == "worker.zip") | .browser_download_url')
           if [[ -z "$DOWNLOAD_URL" ]]; then
-            echo "❌ 未找到 worker.zip 资产"
+            echo "❌ 未找到 worker.zip"
             exit 1
           fi
           mkdir -p unobfuscated
-          # 下载并解压
           curl -sL "$DOWNLOAD_URL" -o unobfuscated/worker.zip
           unzip -q unobfuscated/worker.zip -d unobfuscated/
-          echo "✅ 成功解压资产到 unobfuscated 目录"
+          echo "✅ 资产解压完成"
 
       - name: 混淆并重命名为 worker.js
         run: |
           mkdir -p 混淆
-          # 自动查找未混淆的JS文件（排除已混淆的）
           SOURCE_FILE=$(find unobfuscated -type f -name "*.js" | grep -v "_obfuscated.js" | head -n 1)
           if [[ -z "$SOURCE_FILE" ]]; then
-            echo "❌ 未找到未混淆的JS源文件"
+            echo "❌ 未找到未混淆的JS文件"
             exit 1
           fi
-          OUTPUT_NAME="worker.js" # 目标文件名
-          # 执行混淆
+          OUTPUT_NAME="worker.js" 
+          # 按照配置添加混淆选项
           javascript-obfuscator "$SOURCE_FILE" --output "混淆/$OUTPUT_NAME" \
             --compact true \
-            --control-flow-flattening true \
-            --dead-code-injection true \
-            --identifier-names-generator hexadecimal \
-            --string-array true \
-            --string-array-encoding 'rc4'
-          echo "✅ 已生成混淆文件 混淆/$OUTPUT_NAME"
+            --disable-formatted-output  # 禁止格式化，对应禁止格式化选项
+            --disable-console-output  # 禁止控制台输出
+            --disable-debugger-statement  # 近似禁止控制台调试（无完全对应选项，该选项禁止调试语句）
+            --transform-numbers-to-expressions true  # 数值转表达式
+            --optimize-code true  # 优化代码结构
+            --split-strings true  # 分割字符串
+            --unicode-escape-sequence true  # 转义Unicode（近似选项，原选项名称差异）
+            --rename-global-variables true  # 重命名全局变量
+            --rename-property-names true  # 重命名方法&属性
+            --dead-code-injection true  # 注入死代码
+            --dead-code-injection-threshold 0.4  # 注入死代码阈值
+            --control-flow-flattening true  # 控制流平坦化
+            --control-flow-flattening-threshold 0.75  # 控制流平坦化阈值
+            --identifier-names-generator hexadecimal  # 标识符名称生成器
+          echo "✅ 混淆完成并保存为 混淆/$OUTPUT_NAME"
 
       - name: 提交结果
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: "🔄 混淆代码并重命名为 worker.js"
           files: |
-            混淆/worker.js       # 提交混淆后的文件
-            unobfuscated/        # 保留原始资产目录（可选）
-          branch: main          # 提交到主分支
+            混淆/worker.js
+            unobfuscated/
