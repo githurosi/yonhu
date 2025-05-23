@@ -1,4 +1,4 @@
-name: BPB Panel 资产混淆与重命名
+name: BPB Panel 资产混淆
 on:
   push:
     branches:
@@ -13,53 +13,47 @@ jobs:
   build-obfuscate:
     runs-on: ubuntu-latest
     steps:
-      - name: 检出仓库
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-
       - name: 安装UglifyJS
         run: |
           npm install -g uglify-js
 
-      - name: 下载并解压资产到未混淆文件夹
+      - name: 混淆并下载文件
         run: |
           REPO_OWNER="bia-pain-bache"
           REPO_NAME="BPB-Worker-Panel"
-          rm -rf unobfuscated/*
           response=$(curl -s https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest)
           DOWNLOAD_URL=$(echo "$response" | jq -r '.assets[] | select(.name == "worker.zip") | .browser_download_url')
           if [[ -z "$DOWNLOAD_URL" ]]; then
             echo "❌ 未找到 worker.zip"
             exit 1
           fi
-          mkdir -p unobfuscated
-          curl -sL "$DOWNLOAD_URL" -o unobfuscated/worker.zip
-          unzip -q unobfuscated/worker.zip -d unobfuscated/
-          echo "✅ 资产解压完成"
-
-      - name: 混淆并重命名为 worker.js
-        run: |
-          mkdir -p 混淆
-          SOURCE_FILE=$(find unobfuscated -type f -name "*.js" | grep -v "_obfuscated.js" | head -n 1)
+          # 下载worker.zip到临时目录
+          TMP_DIR=$(mktemp -d)
+          curl -sL "$DOWNLOAD_URL" -o "$TMP_DIR/worker.zip"
+          unzip -q "$TMP_DIR/worker.zip" -d "$TMP_DIR"
+          # 查找未混淆的JS文件
+          SOURCE_FILE=$(find "$TMP_DIR" -type f -name "*.js" | grep -v "_obfuscated.js" | head -n 1)
           if [[ -z "$SOURCE_FILE" ]]; then
             echo "❌ 未找到未混淆的JS文件"
             exit 1
           fi
-          OUTPUT_NAME="worker.js" 
-          uglifyjs "$SOURCE_FILE" -o "混淆/$OUTPUT_NAME" \
+          # 进行混淆
+          OUTPUT_FILE="${SOURCE_FILE%.*}_obfuscated.js"
+          uglifyjs "$SOURCE_FILE" -o "$OUTPUT_FILE" \
             --mangle \
             --compress \
             --output beautify=false \
             --output comments=false \
             --toplevel \
             --dead_code_inline
-          echo "✅ 混淆完成并保存为 混淆/$OUTPUT_NAME"
+          # 下载混淆后的文件到你指定的工具位置（假设为当前仓库的obfuscated目录）
+          mkdir -p obfuscated
+          mv "$OUTPUT_FILE" obfuscated/
+          echo "✅ 混淆完成并保存到obfuscated目录"
 
       - name: 提交结果
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "🔄 混淆代码并重命名为 worker.js"
+          commit_message: "🔄 完成BPB Panel资产混淆"
           files: |
-            混淆/worker.js
-            unobfuscated/
+            obfuscated/
