@@ -3,10 +3,13 @@ on:
   workflow_dispatch:
     inputs:
       run-type:
-        description: "运行模式（normal/debug）"
+        description: "混淆阶段（base/medium/high）"
         required: true
-        default: "normal"
-        options: ["normal", "debug"]
+        default: "base"
+        options: ["base", "medium", "high"]  # 基础→中等→高强度
+      comment:
+        description: "调试备注"
+        required: false
   push:
     branches:
       - main
@@ -20,7 +23,7 @@ jobs:
   build-obfuscate:
     runs-on: macos-latest
     steps:
-      - name: 检出仓库（仅用于提交结果，不依赖本地代码）
+      - name: 检出仓库
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
@@ -28,49 +31,50 @@ jobs:
       - name: 安装混淆工具
         run: npm install -g javascript-obfuscator
 
-      - name: 下载资产并在服务器临时目录处理
+      - name: 动态生成混淆参数
         run: |
-          REPO_OWNER="bia-pain-bache"
-          REPO_NAME="BPB-Worker-Panel"
-          TMP_DIR=$(mktemp -d)  # 创建服务器临时目录（自动清理）
-          cd "$TMP_DIR"          # 进入临时目录操作
+          # 定义各阶段参数（按强度递增）
+          case "${{ github.event.inputs.run-type }}" in
+            "base")
+              # 基础阶段：仅压缩+变量名混淆
+              PARAMS="--compact true --identifier-names-generator hexadecimal"
+              ;;
+            "medium")
+              # 中等阶段：增加字符串数组加密+死代码注入
+              PARAMS="--compact true --identifier-names-generator hexadecimal \
+                      --string-array true --string-array-encoding 'rc4' \
+                      --dead-code-injection true --dead-code-injection-threshold 0.3"
+              ;;
+            "high")
+              # 高强度阶段：开启控制流平坦化+调试保护
+              PARAMS="--compact true --identifier-names-generator hexadecimal \
+                      --string-array true --string-array-encoding 'rc4' \
+                      --dead-code-injection true --dead-code-injection-threshold 0.5 \
+                      --control-flow-flattening true --control-flow-flattening-threshold 0.7 \
+                      --debug-protection true"
+              ;;
+            *)
+              echo "❌ 无效的 run-type: ${{ github.event.inputs.run-type }}"
+              exit 1
+              ;;
+          esac
+          echo "PARAMS=$PARAMS" >> "$GITHUB_ENV"  # 写入环境变量供后续步骤使用
 
-          # 下载并解压资产（所有操作在服务器临时空间完成）
-          response=$(curl -s https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest)
-          DOWNLOAD_URL=$(echo "$response" | jq -r '.assets[] | select(.name == "worker.zip") | .browser_download_url')
-          curl -sL "$DOWNLOAD_URL" -o worker.zip
-          unzip -q worker.zip
-
-          # 定位未混淆文件
-          SOURCE_FILE=$(find . -type f -name "*.js" | grep -v "_obfuscated.js" | head -n 1)
-          if [[ -z "$SOURCE_FILE" ]]; then
-            echo "❌ 未找到未混淆的JS文件"
+      - name: 下载并处理资产（示例，可替换为你的文件路径逻辑）
+        run: |
+          # 假设待混淆文件为仓库内的 src/worker.js
+          SOURCE_FILE="./src/worker.js"
+          if [[ ! -f "$SOURCE_FILE" ]]; then
+            echo "❌ 未找到源文件: $SOURCE_FILE"
             exit 1
           fi
-
-          # 执行混淆
           mkdir -p obfuscated
-          OUTPUT_NAME="worker.js"
-          if [[ "${{ github.event.inputs.run-type }}" == "debug" ]]; then
-            DEBUG_PARAM="--dead-code-injection-threshold 0.2 --control-flow-flattening false"
-          else
-            DEBUG_PARAM=""
-          fi
-          javascript-obfuscator "$SOURCE_FILE" --output "obfuscated/$OUTPUT_NAME" \
-            --compact true \
-            --dead-code-injection true \
-            --identifier-names-generator hexadecimal \
-            --string-array true \
-            --string-array-encoding 'rc4' \
-            $DEBUG_PARAM
+          javascript-obfuscator "$SOURCE_FILE" --output "obfuscated/worker.js" $PARAMS
+          echo "✅ 混淆完成（阶段: ${{ github.event.inputs.run-type }}）"
 
-          # 将混淆结果复制到仓库目录（GITHUB_WORKSPACE）
-          cp -r "$TMP_DIR/obfuscated" "$GITHUB_WORKSPACE/"
-          echo "✅ 混淆结果已从服务器临时目录同步到仓库目录"
-
-      - name: 提交混淆结果到仓库
+      - name: 提交结果
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "🔄 服务器端混淆完成 | 模式: ${{ github.event.inputs.run-type }}"
+          commit_message: "🔄 混淆阶段: ${{ github.event.inputs.run-type }} | ${{ github.event.inputs.comment }}"
           files: |
             obfuscated/worker.js
