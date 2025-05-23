@@ -27,11 +27,10 @@ jobs:
 
       - name: 下载worker.zip（指向Release资产）
         run: |
-          # 替换为仓库最新Release的worker.zip地址（需手动获取Release ID）
-          RELEASE_ID=$(curl -s https://api.github.com/repos/bia-pain-bache/BPB-Worker-Panel/releases/latest | jq -r '.id')
-          wget -O worker.zip "https://github.com/bia-pain-bache/BPB-Worker-Panel/releases/download/v$(curl -s https://api.github.com/repos/bia-pain-bache/BPB-Worker-Panel/releases/latest | jq -r '.tag_name')/worker.zip"
-          unzip worker.zip -d worker-src
-          mv worker-src/unobfuscated-worker.js origin.js  # 假设解压后路径包含该文件
+         RELEASE_ID=$(curl -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" -s https://api.github.com/repos/bia-pain-bache/BPB-Worker-Panel/releases/latest | jq -r '.id')
+         wget -O worker.zip "https://github.com/bia-pain-bache/BPB-Worker-Panel/releases/download/v$(curl -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" -s https://api.github.com/repos/bia-pain-bache/BPB-Worker-Panel/releases/latest | jq -r '.tag_name')/worker.zip"
+         unzip worker.zip -d worker-src
+         mv worker-src/unobfuscated-worker.js origin.js 
 
       - name: 混淆BPB工作脚本
         run: |
