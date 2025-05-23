@@ -4,8 +4,7 @@ on:
     branches:
       - main
   schedule:
-    # 每天凌晨1点运行
-    - cron: "0 1 * * *"
+    - cron: "0 1 * * *" # 每天凌晨1点运行
 
 permissions:
   contents: write
@@ -24,13 +23,16 @@ jobs:
           node-version: "latest"
 
       - name: 安装混淆工具
-        run: |
-          npm install -g javascript-obfuscator          
+        run: npm install -g javascript-obfuscator          
 
-      - name: 克隆BPB工作脚本（更新地址）
+      - name: 下载worker.zip（指向Release资产）
         run: |
-          wget -O origin.js https://github.com/bia-pain-bache/BPB-Worker-Panel/raw/main/build/unobfuscated-worker.js          
-      
+          # 替换为仓库最新Release的worker.zip地址（需手动获取Release ID）
+          RELEASE_ID=$(curl -s https://api.github.com/repos/bia-pain-bache/BPB-Worker-Panel/releases/latest | jq -r '.id')
+          wget -O worker.zip "https://github.com/bia-pain-bache/BPB-Worker-Panel/releases/download/v$(curl -s https://api.github.com/repos/bia-pain-bache/BPB-Worker-Panel/releases/latest | jq -r '.tag_name')/worker.zip"
+          unzip worker.zip -d worker-src
+          mv worker-src/unobfuscated-worker.js origin.js  # 假设解压后路径包含该文件
+
       - name: 混淆BPB工作脚本
         run: |
           javascript-obfuscator origin.js --output _worker.js \
