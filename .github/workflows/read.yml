@@ -1,4 +1,4 @@
-name: Build Obfuscate BPB Panel
+name: BPB Panel 资产混淆与重命名
 on:
   push:
     branches:
@@ -10,48 +10,62 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  build-obfuscate:
     runs-on: ubuntu-latest
-
     steps:
-      - name: 检出代码
+      - name: 检出仓库
         uses: actions/checkout@v4
-
-      - name: 设置Node.js环境
-        uses: actions/setup-node@v4
         with:
-          node-version: "latest"
+          fetch-depth: 1 # 仅拉取最新提交，加快速度
 
       - name: 安装混淆工具
-        run: npm install -g javascript-obfuscator          
-
-      - name: 下载worker.zip（指向Release资产）
         run: |
-         RELEASE_ID=$(curl -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" -s https://api.github.com/repos/bia-pain-bache/BPB-Worker-Panel/releases/latest | jq -r '.id')
-         wget -O worker.zip "https://github.com/bia-pain-bache/BPB-Worker-Panel/releases/download/v$(curl -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" -s https://api.github.com/repos/bia-pain-bache/BPB-Worker-Panel/releases/latest | jq -r '.tag_name')/worker.zip"
-         unzip worker.zip -d worker-src
-         mv worker-src/unobfuscated-worker.js origin.js 
+          npm install -g javascript-obfuscator
 
-      - name: 混淆BPB工作脚本
+      - name: 下载并解压资产到未混淆文件夹
         run: |
-          javascript-obfuscator origin.js --output _worker.js \
-          --compact true \
-          --control-flow-flattening true \
-          --control-flow-flattening-threshold 1 \
-          --dead-code-injection true \
-          --dead-code-injection-threshold 1 \
-          --identifier-names-generator hexadecimal \
-          --rename-globals true \
-          --string-array true \
-          --string-array-encoding 'rc4' \
-          --string-array-threshold 1 \
-          --transform-object-keys true \
-          --unicode-escape-sequence true          
+          REPO_OWNER="bia-pain-bache"
+          REPO_NAME="BPB-Worker-Panel"
+          rm -rf unobfuscated/* # 清空旧文件
+          # 获取最新Release信息
+          response=$(curl -s https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest)
+          # 提取worker.zip下载地址
+          DOWNLOAD_URL=$(echo "$response" | jq -r '.assets[] | select(.name == "worker.zip") | .browser_download_url')
+          if [[ -z "$DOWNLOAD_URL" ]]; then
+            echo "❌ 未找到 worker.zip 资产"
+            exit 1
+          fi
+          mkdir -p unobfuscated
+          # 下载并解压
+          curl -sL "$DOWNLOAD_URL" -o unobfuscated/worker.zip
+          unzip -q unobfuscated/worker.zip -d unobfuscated/
+          echo "✅ 成功解压资产到 unobfuscated 目录"
 
-      - name: 提交变更
+      - name: 混淆并重命名为 worker.js
+        run: |
+          mkdir -p 混淆
+          # 自动查找未混淆的JS文件（排除已混淆的）
+          SOURCE_FILE=$(find unobfuscated -type f -name "*.js" | grep -v "_obfuscated.js" | head -n 1)
+          if [[ -z "$SOURCE_FILE" ]]; then
+            echo "❌ 未找到未混淆的JS源文件"
+            exit 1
+          fi
+          OUTPUT_NAME="worker.js" # 目标文件名
+          # 执行混淆
+          javascript-obfuscator "$SOURCE_FILE" --output "混淆/$OUTPUT_NAME" \
+            --compact true \
+            --control-flow-flattening true \
+            --dead-code-injection true \
+            --identifier-names-generator hexadecimal \
+            --string-array true \
+            --string-array-encoding 'rc4'
+          echo "✅ 已生成混淆文件 混淆/$OUTPUT_NAME"
+
+      - name: 提交结果
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          branch: main
-          commit_message: ':arrow_up: update latest bpb panel'
-          commit_author: 'github-actions[bot] <github-actions[bot]@users.noreply.github.com>'
-          push_options: '--set-upstream'
+          commit_message: "🔄 混淆代码并重命名为 worker.js"
+          files: |
+            混淆/worker.js       # 提交混淆后的文件
+            unobfuscated/        # 保留原始资产目录（可选）
+          branch: main          # 提交到主分支
