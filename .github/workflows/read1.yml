@@ -12,7 +12,7 @@ on:
 
 jobs:
   obfuscate-code:
-    runs-on: macos-15
+    runs-on: macos-latest
     
     steps:
     - name: Checkout repository
@@ -33,13 +33,13 @@ jobs:
     - name: Download worker.zip from release assets
       run: |
         RELEASE_URL="https://api.github.com/repos/bia-pain-bache/BPB-Worker-Panel/releases/latest"
-        DOWNLOAD_URL=$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" $RELEASE_URL | grep -o 'https://[^"]*worker.zip"')
+        DOWNLOAD_URL=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" "$RELEASE_URL" | grep -o 'https://[^"]*worker.zip"')
         if [ -z "$DOWNLOAD_URL" ]; then
-          echo "Error: Failed to find worker.zip download URL."
+          echo "Error: Failed to find worker.zip"
           exit 1
         fi
         echo "Downloading from: $DOWNLOAD_URL"
-        curl -L -o worker.zip "$DOWNLOAD_URL" || { echo "Error: Failed to download worker.zip"; exit 1; }
+        curl -L -o worker.zip "${DOWNLOAD_URL%?}" || { echo "Error: Failed to download worker.zip"; exit 1; }
 
     - name: Unzip worker.zip
       run: unzip worker.zip -d worker_unzipped || { echo "Error: Failed to unzip worker.zip"; exit 1; }
