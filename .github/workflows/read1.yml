@@ -1,89 +1,39 @@
-name: BPB Panel 资产混淆与重命名
-on:
-  workflow_dispatch:
-    inputs:
-      run-type:
-        description: "混淆阶段（base/medium/high）"
-        required: true
-        default: "base"
-        options: ["base", "medium", "high"]
-      comment:
-        description: "调试备注"
-        required: false
-  push:
-    branches:
-      - main
-  schedule:
-    - cron: "0 1 * * *"
+name: Obfuscate Worker.zip
 
-permissions:
-  contents: write
+on:
+  push:
+    paths:
+      - 'release/assets/worker.zip'
+  workflow_dispatch:
 
 jobs:
-  build-obfuscate:
-    runs-on: macos-latest
+  obfuscate:
+    runs-on: ubuntu-latest
+
     steps:
-      - name: 检出仓库
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
+    - name: 检出代码
+      uses: actions/checkout@v3
 
-      - name: 安装混淆工具
-        run: npm install -g javascript-obfuscator
+    - name: 解压文件
+      run: |
+        mkdir worker_unzipped
+        unzip release/assets/worker.zip -d worker_unzipped
 
-      - name: 动态生成混淆参数
-        run: |
-          case "${{ github.event.inputs.run-type }}" in
-            "base")
-              PARAMS="--compact true --identifier-names-generator hexadecimal"
-              ;;
-            "medium")
-              PARAMS="--compact true --identifier-names-generator hexadecimal \
-                      --string-array true --string-array-encoding 'rc4' \
-                      --dead-code-injection true --dead-code-injection-threshold 0.3"
-              ;;
-            "high")
-              PARAMS="--compact true --identifier-names-generator hexadecimal \
-                      --string-array true --string-array-encoding 'rc4' \
-                      --dead-code-injection true --dead-code-injection-threshold 0.5 \
-                      --control-flow-flattening true --control-flow-flattening-threshold 0.7 \
-                      --debug-protection true"
-              ;;
-            *)
-              echo "❌ 无效的 run-type: ${{ github.event.inputs.run-type }}"
-              exit 1
-              ;;
-          esac
-          echo "PARAMS=$PARAMS" >> "$GITHUB_ENV"
+    - name: 安装 ProGuard
+      run: |
+        sudo apt update
+        sudo apt install proguard
 
-      - name: 下载资产并在服务器临时目录处理
-        run: |
-          REPO_OWNER="bia-pain-bache"
-          REPO_NAME="BPB-Worker-Panel"
-          TMP_DIR=$(mktemp -d)
-          cd "$TMP_DIR"
+    - name: 运行混淆
+      run: |
+        proguard @proguard-rules.pro -injars worker_unzipped -outjars worker_obfuscated
 
-          response=$(curl -s https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest)
-          DOWNLOAD_URL=$(echo "$response" | jq -r '.assets[] | select(.name == "worker.zip") | .browser_download_url')
-          curl -sL "$DOWNLOAD_URL" -o worker.zip
-          unzip -q worker.zip
+    - name: 压缩混淆后的文件
+      run: |
+        zip -r worker_obfuscated.zip worker_obfuscated
 
-          SOURCE_FILE=$(find . -type f -name "*.js" | grep -v "_obfuscated.js" | head -n 1)
-          if [[ -z "$SOURCE_FILE" ]]; then
-            echo "❌ 未找到未混淆的JS文件"
-            exit 1
-          fi
-
-          mkdir -p obfuscated
-          javascript-obfuscator "$SOURCE_FILE" --output "obfuscated/worker.js" $PARAMS
-          echo "✅ 混淆完成（阶段: ${{ github.event.inputs.run-type }}）"
-
-          cp -r "obfuscated" "$GITHUB_WORKSPACE/"
-          echo "✅ 混淆结果已从服务器临时目录同步到仓库目录"
-
-      - name: 提交结果
-        uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: "🔄 混淆阶段: ${{ github.event.inputs.run-type }} | ${{ github.event.inputs.comment }}"
-          files: |
-            obfuscated/worker.js
+    - name: 上传到仓库
+      uses: actions/upload-artifact@v3
+      with:
+        name: worker-obfuscated
+        path: worker_obfuscated.zip
