@@ -1,82 +1,56 @@
-name: BPB-Worker-Panel 高强度混淆工作流
+name: Build Obfuscate BPB Panel
 on:
   push:
     branches:
       - main
   schedule:
-    - cron: "0 1 * * *"  # 每日凌晨1点自动运行
+    # 每天凌晨1点运行
+    - cron: "0 1 * * *"
+
 permissions:
   contents: write
+
 jobs:
-  build-obfuscate:
+  build:
     runs-on: ubuntu-latest
+
     steps:
-      - name: 检出当前仓库
+      - name: 检出代码
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 1  # 仅拉取最新提交，加快速度
+
       - name: 设置Node.js环境
         uses: actions/setup-node@v4
         with:
-          node-version: "20.x"  # 指定LTS版本，确保兼容性
-      - name: 安装系统依赖与混淆工具
+          node-version: "latest"
+
+      - name: 安装混淆工具
         run: |
-          sudo apt-get update -y
-          sudo apt-get install -y unzip  # 用于解压资产包
-          npm install -g javascript-obfuscator@latest  # 安装最新混淆工具
-      - name: 克隆BPB-Worker-Panel仓库（获取未混淆代码）
+          npm install -g javascript-obfuscator          
+
+      - name: 克隆BPB工作脚本（更新地址）
         run: |
-          # 克隆仓库到临时目录，避免与当前仓库冲突
-          git clone https://github.com/bia-pain-bache/BPB-Worker-Panel.git bpb-source
-          # 切换到main分支（确保获取最新代码）
-          cd bpb-source && git checkout main && cd ..
-          # 检查克隆后的文件结构
-          if [[! -d "bpb-source/src" ]]; then
-            echo "❌ 克隆失败，未找到src目录"
-            exit 1
-          fi
-          echo "✅ 成功克隆仓库到 bpb-source/"
-      - name: 定位未混淆的主JS文件
+          wget -O origin.js https://github.com/bia-pain-bache/BPB-Worker-Panel/raw/main/build/unobfuscated-worker.js          
+      
+      - name: 混淆BPB工作脚本
         run: |
-          # 搜索src目录下的所有JS文件（可根据实际情况调整路径）
-          SOURCE_FILE=$(find bpb-source/src -type f -name "*.js" | grep -v "_obfuscated.js" | head -n 1)
-          if [[ -z "$SOURCE_FILE" ]]; then
-            echo "❌ 未找到未混淆的JS文件，检查仓库结构"
-            exit 1
-          fi
-          echo "✅ 主文件路径：$SOURCE_FILE"
-          echo "::set-output name=source_file::$SOURCE_FILE"
-      - name: 执行高强度混淆（用户指定参数）
-        run: |
-          SOURCE_FILE=${{ steps.定位未混淆的主JS文件.outputs.source_file }}
-          OUTPUT_FILE="混淆/worker.js"  # 目标文件名
-          # 创建输出目录
-          mkdir -p $(dirname "$OUTPUT_FILE")
-          # 执行混淆命令，包含用户所有高强度参数
-          javascript-obfuscator "$SOURCE_FILE" --output "$OUTPUT_FILE" \
-            --compact true \
-            --control-flow-flattening true \
-            --control-flow-flattening-threshold 1 \
-            --dead-code-injection true \
-            --dead-code-injection-threshold 1 \
-            --identifier-names-generator hexadecimal \
-            --rename-globals true \
-            --string-array true \
-            --string-array-encoding "rc4" \
-            --string-array-threshold 1 \
-            --transform-object-keys true \
-            --unicode-escape-sequence true
-          # 检查输出文件是否生成
-          if [[! -f "$OUTPUT_FILE" ]]; then
-            echo "❌ 混淆失败，未生成输出文件"
-            exit 1
-          fi
-          echo "✅ 高强度混淆完成：$SOURCE_FILE -> $OUTPUT_FILE"
-      - name: 提交混淆结果到仓库
+          javascript-obfuscator origin.js --output _worker.js \
+          --compact true \
+          --control-flow-flattening true \
+          --control-flow-flattening-threshold 1 \
+          --dead-code-injection true \
+          --dead-code-injection-threshold 1 \
+          --identifier-names-generator hexadecimal \
+          --rename-globals true \
+          --string-array true \
+          --string-array-encoding 'rc4' \
+          --string-array-threshold 1 \
+          --transform-object-keys true \
+          --unicode-escape-sequence true          
+
+      - name: 提交变更
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           branch: main
-          commit_message: '🔒 高强度混淆BPB-Worker-Panel代码'
-          files: |
-            混淆/worker.js  # 仅提交混淆后的文件，保持仓库整洁
+          commit_message: ':arrow_up: update latest bpb panel'
+          commit_author: 'github-actions[bot] <github-actions[bot]@users.noreply.github.com>'
           push_options: '--set-upstream'
