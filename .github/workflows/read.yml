@@ -18,9 +18,9 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: 安装混淆工具
+      - name: 安装UglifyJS
         run: |
-          npm install -g javascript-obfuscator
+          npm install -g uglify-js
 
       - name: 下载并解压资产到未混淆文件夹
         run: |
@@ -47,23 +47,13 @@ jobs:
             exit 1
           fi
           OUTPUT_NAME="worker.js" 
-          # 按照配置添加混淆选项
-          javascript-obfuscator "$SOURCE_FILE" --output "混淆/$OUTPUT_NAME" \
-            --compact true \
-            --disable-formatted-output  # 禁止格式化，对应禁止格式化选项
-            --disable-console-output  # 禁止控制台输出
-            --disable-debugger-statement  # 近似禁止控制台调试（无完全对应选项，该选项禁止调试语句）
-            --transform-numbers-to-expressions true  # 数值转表达式
-            --optimize-code true  # 优化代码结构
-            --split-strings true  # 分割字符串
-            --unicode-escape-sequence true  # 转义Unicode（近似选项，原选项名称差异）
-            --rename-global-variables true  # 重命名全局变量
-            --rename-property-names true  # 重命名方法&属性
-            --dead-code-injection true  # 注入死代码
-            --dead-code-injection-threshold 0.4  # 注入死代码阈值
-            --control-flow-flattening true  # 控制流平坦化
-            --control-flow-flattening-threshold 0.75  # 控制流平坦化阈值
-            --identifier-names-generator hexadecimal  # 标识符名称生成器
+          uglifyjs "$SOURCE_FILE" -o "混淆/$OUTPUT_NAME" \
+            --mangle \
+            --compress \
+            --output beautify=false \
+            --output comments=false \
+            --toplevel \
+            --dead_code_inline
           echo "✅ 混淆完成并保存为 混淆/$OUTPUT_NAME"
 
       - name: 提交结果
